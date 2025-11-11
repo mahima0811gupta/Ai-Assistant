@@ -1,21 +1,20 @@
-# Virtual environments
+# Virtual environment
 webcam_env/
 venv/
-env/
-
-# Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# IDE / editor files
-.vscode/
-.idea/
+# Audio and video outputs
+*.wav
+*.mp3
+*.mp4
 
 # System files
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
+# Gradio and cache
+.gradio/
+.cache/
