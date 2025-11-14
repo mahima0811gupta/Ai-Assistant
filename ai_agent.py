@@ -1,4 +1,3 @@
-
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -10,35 +9,28 @@ import re
 import asyncio
 import time
 
-# Your imports are correct and include all necessary tools
 from tools import (
-    analyze_image_with_query,
     play_youtube_song,
-    read_text_from_image,
-    scan_qr_or_barcode,
     open_application,
     get_weather,
     tavily_web_search,
     write_note,
     remember_this,
     recall_information,
-    format_search_results_safely,
     clean_query
 )
 
 load_dotenv()
 
-# Enhanced system prompt with clearer instructions
-system_prompt = """You are Dora, a personal AI assistant with access to the user's webcam and various tools.
+# Enhanced system prompt WITHOUT visual capabilities
+system_prompt = """You are Dora, a personal AI assistant with voice interaction capabilities.
 
 **CRITICAL RULES - YOU MUST FOLLOW THESE:**
 
-1. **Visual Questions REQUIRE analyze_image_with_query:**
-   - "What am I wearing?" → USE analyze_image_with_query
-   - "Am I wearing glasses?" → USE analyze_image_with_query
-   - "What do you see?" → USE analyze_image_with_query
-   - "What's in front of me?" → USE analyze_image_with_query
-   - ANY question about what the user looks like or what's visible → USE analyze_image_with_query
+1. **NO VISUAL CAPABILITIES:**
+   - You do NOT have access to camera or webcam
+   - You CANNOT see what the user is wearing or what's around them
+   - If asked about visual information, politely explain you're voice-only
 
 2. **Memory Management:**
    - When user states a fact about themselves → USE remember_this
@@ -49,9 +41,8 @@ system_prompt = """You are Dora, a personal AI assistant with access to the user
    - "Open notepad and write" → USE open_application THEN write_note
 
 4. **Tool Usage is MANDATORY:**
-   - NEVER say "I don't have access to camera" - YOU DO via analyze_image_with_query
-   - NEVER refuse a task if you have a tool for it
-   - Check your tools before saying you can't do something
+   - Check your available tools before saying you can't do something
+   - Use tools for: music, weather, web search, apps, notes, memory
 
 5. **Error Handling:**
    - If a tool fails, acknowledge the error and offer alternatives
@@ -74,7 +65,8 @@ def is_visual_query(query: str) -> bool:
     visual_keywords = [
         'wearing', 'wear', 'see', 'look', 'appear', 'visible', 'showing',
         'what am i', 'am i wearing', 'can you see', 'what do you see',
-        'describe what', 'in front of', 'around me', 'my face', 'my appearance'
+        'describe what', 'in front of', 'around me', 'my face', 'my appearance',
+        'camera', 'webcam', 'picture', 'photo'
     ]
     query_lower = query.lower()
     return any(keyword in query_lower for keyword in visual_keywords)
@@ -88,8 +80,6 @@ def is_memory_statement(query: str) -> bool:
         r"i've \w+",
         r"my name is",
         r"i like",
-        r"i'm wearing",
-        r"i wear",
         r"my favorite \w+ is",
         r"my favourite \w+ is"
     ]
@@ -99,7 +89,6 @@ def is_memory_statement(query: str) -> bool:
 def extract_actual_news_content(results: str) -> str:
     """Extract actual news content from search results with better error handling"""
     try:
-        # First, try to get content from JSON
         if results.startswith('{'):
             data = json.loads(results)
             if 'answer' in data and data['answer']:
@@ -112,7 +101,7 @@ def extract_actual_news_content(results: str) -> str:
             if 'results' in data and data['results']:
                 news_items = []
                 
-                for result in data['results'][:3]:  # Limit to 3 results
+                for result in data['results'][:3]:
                     content = result.get('content', '')
                     title = result.get('title', '')
                     
@@ -121,18 +110,16 @@ def extract_actual_news_content(results: str) -> str:
                         
                     full_content = f"{title}. {content}" if title else content
                     
-                    # Skip promotional content
                     if any(phrase in full_content.lower() for phrase in [
                         'provides latest news', 'get latest news', 'read breaking news',
                         'check out', 'click here', 'subscribe', 'follow us'
                     ]):
                         continue
                     
-                    # Extract meaningful sentences
                     sentences = full_content.split('. ')
                     meaningful_sentences = []
                     
-                    for sentence in sentences[:2]:  # First 2 sentences
+                    for sentence in sentences[:2]:
                         sentence = sentence.strip()
                         if (len(sentence) > 20 and 
                             not any(skip in sentence.lower() for skip in ['click', 'subscribe', 'website'])):
@@ -142,11 +129,9 @@ def extract_actual_news_content(results: str) -> str:
                         news_items.append('. '.join(meaningful_sentences))
                 
                 if news_items:
-                    return ' '.join(news_items[:2])  # Return top 2 items
+                    return ' '.join(news_items[:2])
         
-        # Fallback for string results
         if isinstance(results, str) and len(results) > 50:
-            # Clean up the string
             cleaned = re.sub(r'```.*?```', '', results)
             cleaned = re.sub(r'\*{1,2}([^\*]+)\*{1,2}', r'\1', cleaned)
             cleaned = re.sub(r'\s+', ' ', cleaned).strip()
@@ -164,41 +149,34 @@ def detect_query_intent(user_query: str) -> tuple:
     """Detect query intent and return (intent, should_use_direct_approach)"""
     query_lower = user_query.lower()
     
-    # Check for visual queries first - these should go to the agent
+    # NEW: Detect visual queries and reject them
     if is_visual_query(query_lower):
-        return ('visual', False)
+        return ('visual_rejected', True)
     
-    # Check for memory statements - these should go to the agent
     if is_memory_statement(query_lower):
         return ('memory', False)
     
-    # Check for compound commands
     if ("open" in query_lower or "launch" in query_lower) and ("write" in query_lower or "type" in query_lower):
         return ('compound_command', False)
     
-    # Music keywords detection
     music_keywords = ['play', 'song', 'music']
     if any(keyword in query_lower for keyword in music_keywords):
         if not any(word in query_lower for word in ['game', 'video', 'movie']):
             return ('music', True)
     
-    # Application keywords detection
     app_keywords = ['open', 'launch', 'start', 'begin', 'run']
     apps = ['notepad', 'chrome', 'calculator', 'explorer', 'browser']
     if any(keyword in query_lower for keyword in app_keywords) and any(app in query_lower for app in apps):
         return ('application', True)
 
-    # Weather keywords
     weather_keywords = ['weather', 'temperature', 'forecast', 'rain', 'sunny', 'cloudy']
     if any(keyword in query_lower for keyword in weather_keywords):
         return ('weather', True)
     
-    # News keywords
     news_keywords = ['news', 'latest', 'headlines', 'breaking', 'current events']
     if any(keyword in query_lower for keyword in news_keywords):
         return ('news', True)
     
-    # Cricket/sports keywords
     cricket_keywords = ['cricket', 'score', 'match', 'game']
     if any(keyword in query_lower for keyword in cricket_keywords):
         return ('cricket', True)
@@ -209,7 +187,6 @@ def extract_song_name(user_query: str) -> str:
     """Better extraction of song name from query"""
     query_lower = user_query.lower()
     
-    # Pattern matching for different formats
     patterns = [
         r"play (?:the )?(?:song )?['\"]?(.+?)['\"]? by (.+?)(?:\s+on youtube)?$",
         r"play (.+) by (.+)",
@@ -225,7 +202,6 @@ def extract_song_name(user_query: str) -> str:
             else:
                 return match.group(1).strip()
     
-    # Fallback: remove common prefixes
     prefixes = ['play song', 'play the song', 'play music', 'play']
     result = query_lower
     for prefix in prefixes:
@@ -246,7 +222,7 @@ def safe_tool_execution(tool_func, *args, **kwargs):
         except ConnectionResetError as e:
             print(f"Connection reset error on attempt {attempt + 1}: {e}")
             if attempt < max_retries:
-                time.sleep(1)  # Wait 1 second before retry
+                time.sleep(1)
                 continue
             return f"Connection error occurred. Please try again."
         except Exception as e:
@@ -259,8 +235,13 @@ def safe_tool_execution(tool_func, *args, **kwargs):
     return "Tool execution failed after retries."
 
 def direct_tool_handler(intent: str, user_query: str) -> str:
-    """Handle specific queries directly with tools - now with better error handling"""
+    """Handle specific queries directly with tools"""
     query_lower = user_query.lower()
+    
+    if intent == 'visual_rejected':
+        return ("I'm a voice-only assistant and don't have access to a camera or webcam. "
+                "I can help you with music, weather, web searches, opening apps, writing notes, "
+                "and remembering information. What would you like me to do?")
     
     if intent == 'music':
         try:
@@ -315,7 +296,6 @@ def direct_tool_handler(intent: str, user_query: str) -> str:
         try:
             print(f"🌤️ Getting weather for: {user_query}")
             result = safe_tool_execution(get_weather._run, user_query)
-            # Clean up weather response
             result = re.sub(r'^#+\s*', '', str(result))
             result = re.sub(r'\*{1,2}([^\*]+)\*{1,2}', r'\1', result)
             return result.strip()
@@ -326,18 +306,16 @@ def direct_tool_handler(intent: str, user_query: str) -> str:
 
 def ask_agent(user_query: str, chat_history: list) -> str:
     """
-    Processes a user query with improved error handling and connection stability.
+    Processes a user query with improved error handling
     """
     if not llm:
         return "Sorry, the AI model is not available. Please check your configuration."
     
     print(f"🧠 Agent received query: {user_query}")
     
-    # Clean the query first to remove audio artifacts
     cleaned_query = clean_query(user_query)
     print(f"🧹 Cleaned query: '{cleaned_query}'")
     
-    # If the query becomes empty or too short after cleaning, return a friendly message
     if not cleaned_query.strip() or len(cleaned_query.strip()) < 3:
         return "I'm listening, but I only heard some background sounds. Could you please speak more clearly?"
     
@@ -350,28 +328,23 @@ def ask_agent(user_query: str, chat_history: list) -> str:
     print("🤖 Using LangGraph agent for general query")
     
     try:
-        # Create the agent with error handling
+       
         agent = create_react_agent(
             llm,
             [
-                analyze_image_with_query,
                 remember_this,
                 recall_information,
                 tavily_web_search,
                 get_weather,
                 play_youtube_song,
-                read_text_from_image,
-                scan_qr_or_barcode,
                 open_application,
                 write_note
             ]
         )
         
-        # Add system message to the conversation
         conversation = [{"role": "system", "content": system_prompt}] + chat_history + [{"role": "user", "content": cleaned_query}]
         input_messages = {"messages": conversation}
         
-        # Execute with timeout and error handling
         max_retries = 2
         for attempt in range(max_retries + 1):
             try:
@@ -379,10 +352,8 @@ def ask_agent(user_query: str, chat_history: list) -> str:
                 final_content = response['messages'][-1].content
                 print(f"✅ Agent returned response: {final_content}")
                 
-                # Handle memory statements
                 if intent == 'memory':
                     try:
-                        # Also save to memory if it's a personal statement
                         memory_result = safe_tool_execution(remember_this._run, cleaned_query)
                         print(f"💾 Saved to memory: {memory_result}")
                     except Exception as e:
@@ -393,7 +364,7 @@ def ask_agent(user_query: str, chat_history: list) -> str:
             except ConnectionResetError as e:
                 print(f"Connection reset on attempt {attempt + 1}: {e}")
                 if attempt < max_retries:
-                    time.sleep(2)  # Wait longer for connection issues
+                    time.sleep(2)
                     continue
                 return "I'm having connection issues. Please try asking again."
             

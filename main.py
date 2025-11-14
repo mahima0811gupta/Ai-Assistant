@@ -1,11 +1,5 @@
-
-
-
-
-
 import os
 import gradio as gr
-import cv2
 import torch
 import sounddevice as sd
 import numpy as np
@@ -19,7 +13,6 @@ import logging
 from speech_to_text import transcribe_with_gemini
 from ai_agent import ask_agent
 from text_to_speech import text_to_speech_with_gtts
-from shared_frame import set_current_frame
 
 # Configure clean logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -124,41 +117,7 @@ def get_recorder():
     return _recorder_instance
 
 
-# SECTION 2: WEBCAM & MAIN APPLICATION LOGIC 
-
-camera = None
-
-def start_webcam():
-    """Initializes and holds the webcam resource, trying multiple indices."""
-    global camera
-    if camera is None:
-        for idx in range(4):
-            try:
-                camera_candidate = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-                if camera_candidate and camera_candidate.isOpened():
-                    ret, _ = camera_candidate.read()
-                    if ret:
-                        camera = camera_candidate
-                        print(f"✅ Camera {idx} initialized successfully")
-                        break
-                    else:
-                        camera_candidate.release()
-            except Exception as e:
-                print(f"Camera {idx} failed to open: {e}")
-        if camera is None:
-            print("❌ Error: Could not start any camera.")
-    return get_webcam_frame() 
-
-def get_webcam_frame():
-    """Captures a frame from the running webcam and shares it."""
-    global camera
-    if camera and camera.isOpened():
-        ret, frame = camera.read()
-        if ret:
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            set_current_frame(rgb_frame)
-            return rgb_frame
-    return None
+# SECTION 2: MAIN APPLICATION LOGIC (NO WEBCAM)
 
 def listen_and_respond(chat_history):
     """Primary function triggered by the 'Click to Speak' button."""
@@ -216,26 +175,72 @@ def process_recorded_audio(chat_history, user_audio_path):
     yield chat_history, response_audio_file, "Ready. Click the button to speak.", gr.update(interactive=True)
 
 
-# SECTION 3: GRADIO USER INTERFACE 
+# SECTION 3: GRADIO USER INTERFACE - OPTIMIZED SINGLE PAGE
 
-with gr.Blocks(theme=gr.themes.Soft()) as demo:
+# Custom CSS to reduce spacing
+custom_css = """
+#chat-interface-header {
+    margin-bottom: 5px !important;
+    padding-bottom: 0px !important;
+}
+"""
+
+with gr.Blocks(theme=gr.themes.Soft(), css=custom_css) as demo:
     gr.Markdown("<h1 style='color: orange; text-align: center; font-size: 4em;'>👧🏼 Dora – Your Personal AI Assistant</h1>")
+    gr.Markdown("<p style='text-align: center; font-size: 1.2em;'>Voice-powered AI assistant for music, weather, web search, notes, and more!</p>")
 
     with gr.Row():
         with gr.Column(scale=1):
-            gr.Markdown("## Webcam Feed")
-            webcam_output = gr.Image(label="Live Feed", show_label=False, width=640, height=480)
+            gr.Markdown("## 🎯 Features")
+            gr.Markdown("""
+            - 🎵 Play YouTube songs
+            - 🌤️ Get weather updates
+            - 🔍 Web search & news
+            - 📝 Write notes
+            - 🚀 Open applications
+            - 💾 Remember information
+            - 🏏 Cricket scores
+            """)
 
-        with gr.Column(scale=1):
-            gr.Markdown("## Chat Interface")
-            chatbot = gr.Chatbot(label="Conversation", height=400, show_label=False, type="messages")
-            audio_out = gr.Audio(label="Assistant's Voice", autoplay=True, visible=False)
-            speak_btn = gr.Button("🎤 Click to Speak", variant="primary")
-            status_box = gr.Textbox(label="Status", value="Initializing...", interactive=False)
-            clear_btn = gr.Button("Clear Chat", variant="secondary")
+        with gr.Column(scale=2):
+            gr.Markdown("## 💬 Chat Interface", elem_id="chat-interface-header")
+            
+            # Chatbot with adjusted height
+            chatbot = gr.Chatbot(
+                label="Conversation", 
+                height=350, 
+                show_label=False, 
+                type="messages"
+            )
+            
+            # Audio output (hidden by default)
+            audio_out = gr.Audio(
+                label="Assistant's Voice", 
+                autoplay=True, 
+                visible=False
+            )
+            
+            # Control buttons
+            with gr.Row():
+                speak_btn = gr.Button(
+                    "🎤 Click to Speak", 
+                    variant="primary", 
+                    scale=3
+                )
+                clear_btn = gr.Button(
+                    "🗑️ Clear Chat", 
+                    variant="secondary", 
+                    scale=1
+                )
+            
+            # Status indicator
+            status_box = gr.Textbox(
+                label="Status", 
+                value="Initializing...", 
+                interactive=False
+            )
 
-    gr.Timer(0.033).tick(fn=get_webcam_frame, outputs=[webcam_output])
-
+    # Event Handlers
     speak_btn.click(
         fn=listen_and_respond,
         inputs=[chatbot],
@@ -248,15 +253,12 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     )
     
     demo.load(
-        fn=start_webcam,
-        outputs=[webcam_output]
-    ).then(
         fn=lambda: "Ready. Click the button to speak.",
         outputs=[status_box]
     )
 
 
-#SECTION 4: LAUNCH THE APPLICATION 
+# SECTION 4: LAUNCH THE APPLICATION 
 
 def silence_connection_reset(loop, context):
     exc = context.get("exception")
@@ -275,3 +277,7 @@ if __name__ == "__main__":
         share=False,
         debug=False
     )
+
+
+
+

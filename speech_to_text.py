@@ -47,3 +47,5 @@ def transcribe_with_gemini(audio_filepath):
 
 # audio_filepath = "test_text_to_speech.mp3"
 # print(transcribe_with_gemini(audio_filepath))
+
+
