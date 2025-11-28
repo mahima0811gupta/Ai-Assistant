@@ -16,5 +16,6 @@ langchain-tavily
 tavily-python
 pywhatkit
 requests
+ deepgram-sdk
 
 

@@ -18,4 +18,5 @@ Thumbs.db
 # Gradio and cache
 .gradio/
 .cache/
+.env
 
