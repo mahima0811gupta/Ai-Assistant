@@ -96,7 +96,8 @@ Add your keys:
 
 GOOGLE_API_KEY=your_google_key
 OPENWEATHER_API_KEY=your_weather_key
-GROQ_API_KEY=your_groq_key
+TAVILY_API_KEY=your_tavily_key
+
 
 5️⃣ Run the Application
 python main.py
